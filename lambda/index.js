@@ -34,7 +34,7 @@ const HelloWorldIntentHandler = {
         let speakOutput;
         try {
             const response = request('POST',
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
                 {
                     headers: {
                         'Content-Type': 'application/json',
