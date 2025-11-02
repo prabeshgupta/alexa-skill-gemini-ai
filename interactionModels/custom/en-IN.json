@@ -10,7 +10,7 @@
               "type": "AMAZON.SearchQuery",
               "confirmationRequired": false,
               "prompts": {
-                "elicitation": "Elicit.Slot.19289713759.1081638079494"
+                "elicitation": "Elicit.Slot.141196234072.1702860337695"
               }
             }
           ],
@@ -73,10 +73,10 @@
         "variations": [
           {
             "type": "PlainText",
-            "value": "What do you need?"
+            "value": "What do you need"
           }
         ],
-        "id": "Elicit.Slot.19289713759.1081638079494"
+        "id": "Elicit.Slot.141196234072.1702860337695"
       }
     ]
   }

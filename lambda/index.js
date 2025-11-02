@@ -1,13 +1,69 @@
 const Alexa = require('ask-sdk-core');
-const request = require('sync-request');
+const axios = require('axios'); // Use axios for async requests
 const { GEMINI_API_KEY } = require('./config');
+
+// Helper function to call the Gemini API
+async function getGeminiResponse(history) {
+    try {
+        const response = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`,
+            {
+                "contents": history, // Send the entire conversation history
+                "systemInstruction": {
+                    "parts": [{
+                        "text": "You are an expert assistant. Your responses should be concise and suitable for a voice assistant."
+                    }]
+                },
+                "safetySettings": [
+                    { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH" },
+                    { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH" },
+                    { "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH" },
+                    { "category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH" }
+                ],
+                "generationConfig": {
+                    "temperature": 0.8,
+                    "topK": 40,
+                    "topP": 0.95,
+                    "maxOutputTokens": 2048,
+                    "stopSequences": []
+                }
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            }
+        );
+
+        if (response.status === 200 && response.data.candidates && response.data.candidates[0].content) {
+            // Join all parts of the response to get a complete answer
+            return response.data.candidates[0].content.parts.map(part => part.text).join(" ");
+        } else if (response.data.promptFeedback && response.data.promptFeedback.blockReason) {
+            return "I can't answer that question due to content restrictions.";
+        } else {
+            console.error('Gemini API Error:', response.data);
+            return "Hmm, I'm having trouble with that question. Could you try rephrasing?";
+        }
+
+    } catch (error) {
+        console.error('API Request Failed:', error.response ? error.response.data : error.message);
+        return "Sorry, I'm having trouble connecting to the knowledge service. Please try again later.";
+    }
+}
+
 
 const LaunchRequestHandler = {
     canHandle(handlerInput) {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'LaunchRequest';
     },
     handle(handlerInput) {
-        const speakOutput = 'Welcome to Brilliant Answers powered by Google Gemini. Say "Hello" followed by your question to get started.';
+        const speakOutput = 'Welcome to Brilliant Answers. Say "Hello" followed by your question to get started.';
+        
+        // Initialize session attributes
+        const sessionAttributes = {};
+        sessionAttributes.history = []; // Create an empty history array
+        handlerInput.attributesManager.setSessionAttributes(sessionAttributes);
+
         return handlerInput.responseBuilder
             .speak(speakOutput)
             .reprompt(speakOutput)
@@ -20,78 +76,52 @@ const HelloWorldIntentHandler = {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'IntentRequest'
             && Alexa.getIntentName(handlerInput.requestEnvelope) === 'HelloWorldIntent';
     },
-    handle(handlerInput) {
+    async handle(handlerInput) { // Make the handler async
         const catchAllSlot = handlerInput.requestEnvelope.request.intent.slots.catchAll;
-        const catchAllValue = catchAllSlot && catchAllSlot.value;
-        
-        if (!catchAllValue) {
+        const userQuestion = catchAllSlot && catchAllSlot.value;
+
+        if (!userQuestion) {
             return handlerInput.responseBuilder
                 .speak("Please ask your question after saying hello. For example: 'Hello, how do airplanes fly?'")
                 .reprompt("Try asking something like: 'Hello, what is the capital of France?'")
                 .getResponse();
         }
 
-        let speakOutput;
-        try {
-            const response = request('POST',
-                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-                {
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        "contents": [{
-                            "parts": [{
-                                "text": `You are an expert assistant dedicated to providing accurate and helpful responses. Deliver your answer within 8 seconds to ensure Alexa processes it before timing out. Include as much relevant and useful information as possible while maintaining clarity and precision.: ${catchAllValue}`
-                            }]
-                        }],
-                        "safetySettings": [
-                            { "category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH" },
-                            { "category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH" },
-                            { "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH" },
-                            { "category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH" }
-                        ],
-                        "generationConfig": {
-                            "temperature": 0.9,
-                            "topK": 40,
-                            "topP": 0.95,
-                            "maxOutputTokens": 2048,  // Increased to allow longer responses
-                            "stopSequences": []
-                        }
-                    })
-                });
+        // Get session attributes and history
+        const sessionAttributes = handlerInput.attributesManager.getSessionAttributes();
+        const history = sessionAttributes.history || [];
 
-            const responseBody = JSON.parse(response.getBody('utf8'));
+        // Add the user's new question to the history
+        history.push({
+            "role": "user",
+            "parts": [{ "text": userQuestion }]
+        });
 
-            if (response.statusCode === 200 && 
-                responseBody.candidates && 
-                responseBody.candidates[0].content) {
-                
-                // Extract all parts of the response to get a complete answer
-                speakOutput = responseBody.candidates[0].content.parts.map(part => part.text).join(" ");
-                
-                // Clean and truncate response for Alexa
-                speakOutput = speakOutput
-                    .replace(/\*\*/g, '') // Remove bold markers
-                    .replace(/\[.*?\]/g, '') // Remove citations
-                    .substring(0, 6000); // Ensure it's within Alexa's speech limit
-                
-                speakOutput += " <break time='2s'/> Would you like to ask another question? Say 'Hello' followed by your question.";
-                    
-            } else if (responseBody.promptFeedback && responseBody.promptFeedback.blockReason) {
-                speakOutput = "I can't answer that question due to content restrictions.";
-            } else {
-                console.error('Gemini API Error:', responseBody);
-                speakOutput = "Hmm, I'm having trouble with that question. Could you try rephrasing?";
-            }
-        } catch (error) {
-            console.error('API Request Failed:', error);
-            speakOutput = "Sorry, I'm having trouble connecting to the knowledge service. Please try again later.";
-        }
+        // Get the response from Gemini using the full history
+        const geminiAnswer = await getGeminiResponse(history);
+        
+        // Clean the response for Alexa's voice
+        let speakOutput = geminiAnswer
+            .replace(/\*\*/g, '') // Remove bold markers
+            .replace(/\[.*?\]/g, '') // Remove citations
+            .substring(0, 6000); // Ensure it's within Alexa's speech limit
+
+        // Add the model's response to history for future context
+        history.push({
+            "role": "model",
+            "parts": [{ "text": geminiAnswer }] // Save the raw answer for context
+        });
+
+        // Save the updated history back to session attributes
+        sessionAttributes.history = history;
+        handlerInput.attributesManager.setSessionAttributes(sessionAttributes);
+        
+        const repromptText = 'Would you like to ask another question?';
+        speakOutput += ` <break time='1s'/> ${repromptText}`;
 
         return handlerInput.responseBuilder
             .speak(speakOutput)
-            .reprompt('Would you like to ask another question? Say "Hello" followed by your question.')
+            .reprompt(repromptText)
             .getResponse();
     }
 };
@@ -117,6 +147,7 @@ const CancelAndStopIntentHandler = {
                 || Alexa.getIntentName(handlerInput.requestEnvelope) === 'AMAZON.StopIntent');
     },
     handle(handlerInput) {
+        // By ending the session, the session attributes (including history) are automatically cleared.
         const speakOutput = 'Goodbye! Feel free to return anytime with more questions.';
         return handlerInput.responseBuilder
             .speak(speakOutput)
@@ -143,7 +174,8 @@ const SessionEndedRequestHandler = {
         return Alexa.getRequestType(handlerInput.requestEnvelope) === 'SessionEndedRequest';
     },
     handle(handlerInput) {
-        console.log(`Session ended: ${JSON.stringify(handlerInput.requestEnvelope)}`);
+        console.log(`Session ended with reason: ${handlerInput.requestEnvelope.request.reason}`);
+        // Any cleanup logic goes here. The session attributes are already gone.
         return handlerInput.responseBuilder.getResponse();
     }
 };
@@ -153,7 +185,7 @@ const ErrorHandler = {
         return true;
     },
     handle(handlerInput, error) {
-        console.error(`Error handled: ${error.message}`);
+        console.error(`Error handled: ${error.stack}`);
         return handlerInput.responseBuilder
             .speak("Sorry, I'm having trouble processing your request. Please try again.")
             .reprompt("Could you please repeat your question?")
@@ -173,5 +205,5 @@ exports.handler = Alexa.SkillBuilders.custom()
     .addErrorHandlers(
         ErrorHandler
     )
-    .withCustomUserAgent('hello-world/v1.0')
+    .withCustomUserAgent('brilliant-answers/v1.1')
     .lambda();
