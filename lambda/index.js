@@ -6,7 +6,7 @@ const { GEMINI_API_KEY } = require('./config');
 async function getGeminiResponse(history) {
     try {
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`,
             {
                 "contents": history, // Send the entire conversation history
                 "systemInstruction": {
